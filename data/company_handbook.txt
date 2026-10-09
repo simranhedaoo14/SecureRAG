@@ -1,0 +1,23 @@
+
+COMPANY HANDBOOK
+
+Document 1: Work From Home Policy
+Employees may work from home up to three days per week
+with manager approval. Employees must use the company VPN
+when accessing internal systems remotely.
+
+Document 2: Password Policy
+Employees must use passwords of at least 14 characters.
+Multi-factor authentication is required for internal systems.
+Passwords must never be shared with colleagues.
+
+Document 3: Security Incident Reporting
+Employees must report suspected phishing emails to the
+security team immediately. Security incidents should be
+reported through the internal security portal.
+
+Document 4: Data Classification
+Public data may be shared externally.
+Internal data is restricted to company employees.
+Confidential data requires explicit authorization.
+Restricted documents must only be accessed by approved users.
