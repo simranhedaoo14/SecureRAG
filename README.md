@@ -37,22 +37,22 @@ The goal is to build a working RAG pipeline, test its security boundaries, and e
 - **Prompt-injection defense:** The system prompt instructs the model to treat retrieved documents as untrusted data rather than executable instructions.
 - **Automated regression tests:** Verify that unauthorized users cannot retrieve HR documents while authorized users can.
 
-## Security Test Results
+### Security Test Results
 
-The current authorization regression suite includes six passing tests:
+The current security regression suite contains nine passing tests covering:
 
-| Test | Expected result | Status |
-|---|---|---|
-| Engineering user requests HR data | HR chunks are excluded | PASS |
-| HR user requests HR data | HR chunks are available | PASS |
-| Unknown department requests HR data | HR chunks are excluded | PASS |
-| Document has missing department metadata | Document is denied | PASS |
-| Document has unexpected classification | Document is denied | PASS |
-| User has no department assigned | HR chunks are excluded | PASS |
+- Department-based document authorization.
+- Denial of access for unknown users and missing user departments.
+- Denial of documents with missing or unexpected metadata.
+- Verification that HR salary data is absent from Engineering users' retrieved context.
+- Verification that HR salary data is absent when the user's department is missing.
+- Verification that the synthetic prompt-injection payload can be retrieved from the security notice.
 
-The tests exercise the shared authorization function using ChromaDB retrieval and mocked documents with malformed metadata. They run locally without calling the Gemini API.
+The tests exercise the shared authorization function and ChromaDB retrieval using synthetic data. They run without calling the Gemini API.
 
-These results validate the tested retrieval authorization rules. They do not establish that the entire application is production-secure or resistant to every possible attack.
+In a separate manual experiment, Gemini summarized the security notice rather than following its embedded malicious instruction. This demonstrates resistance to the specific payload tested, not guaranteed protection against all prompt-injection attacks.
+
+These results validate the tested retrieval and authorization scenarios; they do not prove that every possible sensitive-data leakage path is prevented or that the application is production-secure.
 
 ### Indirect Prompt-Injection Experiment
 
