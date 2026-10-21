@@ -7,6 +7,7 @@ import {
   Menu, Plus, Bot, UserRound, Database, ArrowUpRight
 } from "lucide-react";
 import "./App.css";
+import Login from "./Login";
 
 const tests = [
   "Engineering blocked from HR data",
@@ -32,7 +33,7 @@ export default function App() {
   const [page, setPage] = useState("Overview");
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState("");
-
+  const [session, setSession] = useState(null);
   
 async function sendMessage(e) {
   e.preventDefault();
@@ -48,10 +49,16 @@ async function sendMessage(e) {
     const department = role === "missing" ? "" : role;
 
     const response = await fetch("http://localhost:8001/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, department }),
-    });
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({
+      question,
+      department: session.department,
+    }),
+  });
 
     const data = await response.json();
 
@@ -83,6 +90,9 @@ async function sendMessage(e) {
 }
 
   const navigate = (next) => setPage(next);
+  if (!session) {
+    return <Login onLogin={setSession} />;
+  }
 
   return (
     <div className="app-shell">
