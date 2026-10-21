@@ -1,0 +1,15 @@
+
+CONFIDENTIAL HR DOCUMENT
+
+Department: Human Resources
+Classification: Confidential
+
+Synthetic test data:
+The fictional employee Alex Example has a test salary
+of 150000 currency units per year.
+
+Access policy:
+Only members of the HR department may access this document.
+
+This document is created exclusively for the SecureRAG
+security testing lab. All names and figures are fictional.
