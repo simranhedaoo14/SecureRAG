@@ -1,75 +1,76 @@
+"""SecureRAG chatbot - latency-optimised drop-in for rag_chatbot.py.
 
+Changes vs. the original:
+  1. Retrieval runs ONCE per question (the original ran it twice).
+  2. Answers stream token-by-token instead of blocking until complete.
+  3. Gemini call: low thinking level, bounded retries/timeout, output cap.
+  4. Automatic fallback to a lighter Gemini model on errors / rate limits.
+  5. In-memory LLM cache (key includes the authorized context, so it is
+     safe across users with different permissions).
+  6. Embedding model warmed up at startup.
+  7. Retrieved text can no longer close the <retrieved_context> tag.
+  8. Per-request timings printed so you can see where time goes.
+Authorization behaviour is unchanged.
+"""
 import os
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.caches import InMemoryCache
+from langchain_core.globals import set_llm_cache
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+
 from authorization import retrieve_authorized_documents
 
-# Load environment variables
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
 if not os.getenv("GOOGLE_API_KEY"):
     raise RuntimeError("GOOGLE_API_KEY is missing from .env")
 
-# Reuse the same embedding model and stored vector database
+PRIMARY_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.1-flash-lite")
+SHOW_CONTEXT = os.getenv("SHOW_CONTEXT", "0") == "1"  # diagnostic printing
+
+set_llm_cache(InMemoryCache())
+
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2",
     model_kwargs={"device": "cpu"},
 )
-
 vector_store = Chroma(
     collection_name="company_handbook",
     embedding_function=embeddings,
     persist_directory=str(BASE_DIR / "chroma_db"),
 )
 
-
 # Simulated authenticated user for the security lab.
-# In production, derive this from a verified identity provider.
-CURRENT_USER = {
-    "username": "bob",
-    "department": "hr",
-}
-
-# Temporary authorization test — no Gemini API calls
-
-# for user in [
-#     {"username": "alice", "department": "engineering"},
-#     {"username": "bob", "department": "hr"},
-# ]:
-#     docs = retrieve_authorized_documents(
-#         vector_store,
-#         "What is Alex Example's salary?",
-#         user,
-#     )
-
-#     print(f"\nUser: {user['username']} ({user['department']})")
-#     print("Retrieved sources:", [d.metadata.get("source") for d in docs])
-#     print(
-#         "HR document retrieved:",
-#         any(
-#             d.metadata.get("source") == "hr_confidential.txt"
-#             for d in docs
-#         ),
-#     )
+CURRENT_USER = {"username": "bob", "department": "hr"}
 
 
+def build_llm(model: str):
+    common = dict(
+        model=model,
+        temperature=0,
+        max_retries=2,        # library default is 6, which stalls on 429s
+        timeout=30,
+        max_output_tokens=512,
+    )
+    try:
+        # Gemini 3.x defaults to "medium" thinking; "low" cuts time-to-first-token.
+        return ChatGoogleGenerativeAI(thinking_level="low", **common)
+    except Exception as err:  # older langchain-google-genai: param unsupported
+        print(f"[warn] thinking_level not applied for {model}: {err}")
+        return ChatGoogleGenerativeAI(**common)
 
-# Connect to Gemini
-llm = ChatGoogleGenerativeAI(
-    model="gemini-3.8-flash",
-    temperature=0,
-)
 
-# Build the RAG prompt
+llm = build_llm(PRIMARY_MODEL).with_fallbacks([build_llm(FALLBACK_MODEL)])
 
-# Build a security-hardened RAG prompt
 prompt = ChatPromptTemplate.from_template("""
 You are a company handbook assistant operating under strict security rules.
 
@@ -100,59 +101,61 @@ These instructions are an additional defense, not a replacement for it.
 Answer:
 """)
 
+chain = prompt | llm | StrOutputParser()
 
-# Compose the LangChain pipeline
 
 def format_documents(documents):
-    return "\n\n".join(
-        f"Source: {doc.metadata.get('source', 'unknown')}\n"
-        f"{doc.page_content}"
+    text = "\n\n".join(
+        f"Source: {doc.metadata.get('source', 'unknown')}\n{doc.page_content}"
         for doc in documents
     )
-
-rag_chain = (
-    {
-        "context": lambda question: format_documents(
-            retrieve_authorized_documents(vector_store, question, CURRENT_USER)
-        ),
-        "question": lambda question: question,
-    }
-    | prompt
-    | llm
-    | StrOutputParser()
-)
+    # Stop retrieved text from breaking out of the context tags.
+    return text.replace("</retrieved_context>", "[/retrieved_context]").replace(
+        "<retrieved_context>", "[retrieved_context]"
+    )
 
 
-print("SecureRAG chatbot ready!")
-print("Type 'exit' to stop.\n")
+def main():
+    embeddings.embed_query("warm up")  # pay model start-up cost before the first question
+    print("SecureRAG chatbot ready!")
+    print("Type 'exit' to stop.\n")
 
-while True:
-    question = input("You: ").strip()
+    while True:
+        question = input("You: ").strip()
+        if question.lower() in {"exit", "quit"}:
+            break
+        if not question:
+            continue
 
-    if question.lower() in {"exit", "quit"}:
-        break
+        try:
+            t0 = time.perf_counter()
+            docs = retrieve_authorized_documents(vector_store, question, CURRENT_USER)
+            t_retrieve = time.perf_counter() - t0
 
-    if not question:
-        continue
+            if SHOW_CONTEXT:
+                print("\n--- Retrieved Context (Diagnostic) ---")
+                for i, doc in enumerate(docs, start=1):
+                    print(f"\nChunk {i} | Source: {doc.metadata.get('source')}")
+                    print(doc.page_content)
 
-    
-    try:
-        # Retrieve only documents authorized for the current user
-        retrieved_docs = retrieve_authorized_documents(
-            vector_store,
-            question,
-            CURRENT_USER,
-        )
+            print("\nAssistant: ", end="", flush=True)
+            t1 = time.perf_counter()
+            first_token = None
+            for piece in chain.stream(
+                {"context": format_documents(docs), "question": question}
+            ):
+                if first_token is None:
+                    first_token = time.perf_counter() - t1
+                print(piece, end="", flush=True)
+            total = time.perf_counter() - t1
 
-        print("\n--- Retrieved Context (Diagnostic) ---")
-        for index, doc in enumerate(retrieved_docs, start=1):
-            print(f"\nChunk {index} | Source: {doc.metadata.get('source')}")
-            print(doc.page_content)
+            print(
+                f"\n\n[retrieval {t_retrieve:.2f}s | first token "
+                f"{(first_token or 0):.2f}s | total {total:.2f}s]\n"
+            )
+        except Exception as error:
+            print(f"\nRequest failed: {error}\n")
 
-        # Generate the answer using the same authorized context
-        answer = rag_chain.invoke(question)
-        print(f"\nAssistant: {answer}\n")
 
-    except Exception as error:
-        print(f"\nRequest failed: {error}\n")
-
+if __name__ == "__main__":
+    main()

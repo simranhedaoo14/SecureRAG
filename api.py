@@ -10,7 +10,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from authorization import retrieve_authorized_documents
 import os
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
 import time
@@ -27,15 +27,18 @@ from fastapi import Depends
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 
+from pydantic import Field
+from typosquatting import scan_domain
+
 BASE_DIR = Path(__file__).resolve().parent
 
 load_dotenv(BASE_DIR / ".env")
 
-if not os.getenv("GOOGLE_API_KEY"):
-    raise RuntimeError("GOOGLE_API_KEY is missing from .env")
+if not os.getenv("GROQ_API_KEY"):
+    raise RuntimeError("GROQ_API_KEY is missing from .env")
 
-llm = ChatGoogleGenerativeAI(
-    model="gemini-3.8-flash",
+llm = ChatGroq(
+    model="openai/gpt-oss-120b",
     temperature=0,
 )
 
@@ -82,16 +85,25 @@ embeddings = HuggingFaceEmbeddings(
     model_kwargs={"device": "cpu"},
 )
 
+# Existing company knowledge base
 vector_store = Chroma(
     collection_name="company_handbook",
     embedding_function=embeddings,
     persist_directory=str(BASE_DIR / "chroma_db"),
 )
 
+# Dedicated SOC security knowledge base
+soc_vector_store = Chroma(
+    collection_name="soc_security_kb",
+    embedding_function=embeddings,
+    persist_directory=str(BASE_DIR / "chroma_db"),
+)
+
+
 
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
-    department: str = Field(min_length=1, max_length=50)
+
 
 from pydantic import BaseModel, EmailStr
 
@@ -99,52 +111,85 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
+class TyposquattingRequest(BaseModel):
+    domain: str = Field(min_length=4, max_length=253)
+    check_dns: bool = True
 
 # Temporary seeded demo account.
 # Store the password hash, never the plaintext password.
-DEMO_EMAIL = os.getenv("DEMO_EMAIL")
-DEMO_PASSWORD = os.getenv("DEMO_PASSWORD")
 
-if not DEMO_EMAIL or not DEMO_PASSWORD:
-    raise RuntimeError("Demo login credentials are missing from .env")
+# Demo accounts: store credentials in .env and hash passwords at startup.
+DEMO_ACCOUNTS = {
+    "hr": {
+        "email": os.getenv("DEMO_HR_EMAIL", "").strip().lower(),
+        "password": os.getenv("DEMO_HR_PASSWORD"),
+        "role": "employee",
+    },
+    "engineering": {
+        "email": os.getenv("DEMO_ENGINEERING_EMAIL", "").strip().lower(),
+        "password": os.getenv("DEMO_ENGINEERING_PASSWORD"),
+        "role": "employee",
+    },
+    "finance": {
+        "email": os.getenv("DEMO_FINANCE_EMAIL", "").strip().lower(),
+        "password": os.getenv("DEMO_FINANCE_PASSWORD"),
+        "role": "employee",
+    },
+    "soc": {
+        "email": os.getenv("DEMO_SOC_EMAIL", "").strip().lower(),
+        "password": os.getenv("DEMO_SOC_PASSWORD"),
+        "role": "soc_analyst",
+    },
+}
 
-DEMO_PASSWORD_HASH = password_hash.hash(DEMO_PASSWORD)
-del DEMO_PASSWORD
+for department, account in DEMO_ACCOUNTS.items():
+    if not account["email"] or not account["password"]:
+        raise RuntimeError(
+            f"Demo credentials missing for {department}. Check .env."
+        )
+    account["password_hash"] = password_hash.hash(account["password"])
+    del account["password"]
 
 
 @app.post("/api/login")
 def login(request: LoginRequest):
-    if (
-        request.email.lower() != DEMO_EMAIL
-        or not password_hash.verify(
-            request.password, DEMO_PASSWORD_HASH
-        )
-    ):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid email or password",
-        )
+    email = str(request.email).strip().lower()
 
-    expires = datetime.now(timezone.utc) + timedelta(
-        minutes=TOKEN_EXPIRE_MINUTES
+    for department, account in DEMO_ACCOUNTS.items():
+        if (
+            secrets.compare_digest(email, account["email"])
+            and password_hash.verify(
+                request.password, account["password_hash"]
+            )
+        ):
+            expires = datetime.now(timezone.utc) + timedelta(
+                minutes=TOKEN_EXPIRE_MINUTES
+            )
+
+            token = jwt.encode(
+                {
+                    "sub": account["email"],
+                    "department": department,
+                    "role": account["role"],
+                    "exp": expires,
+                },
+                JWT_SECRET,
+                algorithm=JWT_ALGORITHM,
+            )
+
+            return {
+                "access_token": token,
+                "token_type": "bearer",
+                "email": account["email"],
+                "department": department,
+                "role": account["role"],
+            }
+
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid email or password",
     )
 
-    token = jwt.encode(
-        {
-            "sub": DEMO_EMAIL,
-            "department": "hr",
-            "exp": expires,
-        },
-        JWT_SECRET,
-        algorithm=JWT_ALGORITHM,
-    )
-
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "email": DEMO_EMAIL,
-        "department": "hr",
-    }
 
 
 def get_current_user(
@@ -159,8 +204,21 @@ def get_current_user(
 
         email = payload.get("sub")
         department = payload.get("department")
+        role = payload.get("role")
 
-        if not email or department not in {"engineering", "hr", "finance"}:
+        # Each department must have its expected role.
+        expected_roles = {
+            "hr": "employee",
+            "engineering": "employee",
+            "finance": "employee",
+            "soc": "soc_analyst",
+        }
+
+        if (
+            not email
+            or department not in expected_roles
+            or role != expected_roles[department]
+        ):
             raise HTTPException(
                 status_code=401,
                 detail="Invalid authentication token",
@@ -169,6 +227,7 @@ def get_current_user(
         return {
             "username": email,
             "department": department,
+            "role": role,
         }
 
     except jwt.InvalidTokenError:
@@ -184,26 +243,120 @@ def health():
     return {"status": "ok", "service": "SecureRAG API"}
 
 
+
 @app.post("/api/chat")
 def chat(
     request: ChatRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    department = request.department.strip().lower()
-
-    if department not in {"engineering", "hr", "finance"}:
-        raise HTTPException(status_code=400, detail="Unsupported demo department")
-
-    user = current_user
     department = current_user["department"]
-
     retrieval_start = time.perf_counter()
 
+    # Select the knowledge base using the verified JWT identity.
+    if current_user["role"] == "soc_analyst":
+        active_vector_store = soc_vector_store
+    else:
+        active_vector_store = vector_store
+
     docs = retrieve_authorized_documents(
-        vector_store,
+        active_vector_store,
         request.question.strip(),
-        user,
+        current_user,
     )
+
+    retrieval_ms = round(
+        (time.perf_counter() - retrieval_start) * 1000, 2
+    )
+    generation_ms = 0
+
+    sources = [
+        {
+            "source": doc.metadata.get("source", "unknown"),
+            "classification": doc.metadata.get("classification", "unknown"),
+            "department": doc.metadata.get("department", "unknown"),
+        }
+        for doc in docs
+    ]
+
+    context = "\n\n".join(doc.page_content for doc in docs)
+
+    if not docs:
+        answer = (
+            "I don't know based on the information "
+            "I'm authorized to access."
+        )
+    else:
+        chain = prompt | llm
+        generation_start = time.perf_counter()
+
+        result = chain.invoke({
+            "context": context,
+            "question": request.question.strip(),
+        })
+
+        generation_ms = round(
+            (time.perf_counter() - generation_start) * 1000, 2
+        )
+
+        answer = result.content
+
+        if isinstance(answer, list):
+            answer = "\n".join(
+                item.get("text", str(item))
+                if isinstance(item, dict)
+                else str(item)
+                for item in answer
+            )
+
+        if not isinstance(answer, str):
+            answer = str(answer)
+
+    return {
+        "answer": answer,
+        "sources": sources,
+        "context_preview": context[:1500],
+        "department": department,
+        "retrieval_ms": retrieval_ms,
+        "generation_ms": generation_ms,
+    }
+
+
+@app.post("/api/soc/typosquatting-scan")
+def typosquatting_scan(
+    request: TyposquattingRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    department = str(current_user.get("department", "")).strip().lower()
+    role = str(current_user.get("role", "")).strip().lower()
+
+    if department != "soc" or role != "soc_analyst":
+        raise HTTPException(
+            status_code=403,
+            detail="Only authenticated SOC analysts can use this scanner.",
+        )
+
+    try:
+        return scan_domain(
+            request.domain,
+            check_dns_records=request.check_dns,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    
+# Select the knowledge base from the verified JWT identity.
+
+    if current_user["role"] == "soc_analyst":
+        active_vector_store = soc_vector_store
+    else:
+        active_vector_store = vector_store
+
+    docs = retrieve_authorized_documents(
+        active_vector_store,
+        request.question.strip(),
+        current_user,
+    )
+
 
     retrieval_ms = round(
         (time.perf_counter() - retrieval_start) * 1000, 2

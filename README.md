@@ -1,142 +1,228 @@
-# SecureRAG — Enterprise RAG Security Lab
+# SecureRAG — AI Security & SOC Investigation Lab
 
-A hands-on AI security project exploring vulnerabilities in Retrieval-Augmented Generation (RAG) systems and implementing defensive controls through controlled attack-and-defense experiments.
+SecureRAG is a security-focused Retrieval-Augmented Generation (RAG) application that combines department-aware document retrieval with a SOC analyst workspace. It explores how to protect retrieved knowledge, limit access to confidential information, and support analyst workflows with AI-generated investigation guidance.
 
-## Overview
+> **Project status:** Working prototype. It is not production security software and does not connect to a live SIEM or automatically contain threats.
 
-SecureRAG is a security-focused RAG chatbot built with LangChain, ChromaDB, local sentence-transformer embeddings, and Google's Gemini API.
+## Highlights
 
-The project uses a fictional company knowledge base to investigate how retrieved documents can influence LLM behavior, how sensitive information can be exposed, and how authorization policies can restrict access to confidential content.
-
-The goal is to build a working RAG pipeline, test its security boundaries, and evaluate defensive controls using repeatable experiments.
+- **Authenticated access:** FastAPI login issues JWTs; protected endpoints derive department and role from the verified token.
+- **Department-aware RAG:** Employee requests use the company handbook collection, while SOC analyst requests use a separate SOC playbook collection.
+- **Retrieval authorization:** Retrieved documents are filtered by department and classification using explicit allow rules.
+- **Groq-powered responses:** LangChain's `ChatGroq` provides LLM generation. Configure a valid model available to your Groq account.
+- **Local embeddings and vector store:** Sentence Transformers embeddings and ChromaDB run locally.
+- **SOC workspace:** Security Assistant, alert investigation guidance, and incident-report drafting.
+- **Typosquatting scanner:** Generates lookalike-domain candidates and optionally checks DNS records for candidates.
+- **Security-focused prompt:** Retrieved documents are treated as untrusted reference material, not instructions.
+- **Regression testing:** Existing authorization tests cover selected cross-department and metadata-denial cases.
 
 ## Architecture
 
-1. **Document ingestion:** Load fictional company documents from the local `data/` directory.
-2. **Text processing:** Split documents into smaller chunks and attach metadata such as source, department, and classification.
-3. **Embedding generation:** Generate local embeddings using Sentence Transformers.
-4. **Vector storage:** Store document chunks in ChromaDB for semantic retrieval.
-5. **Authorization:** Filter retrieved chunks according to the simulated user's department and document classification.
-6. **LLM generation:** Pass authorized context to Gemini using a security-focused LangChain prompt.
-7. **Security evaluation:** Run automated tests to verify document access restrictions.
+1. **Login:** React sends credentials to the FastAPI login endpoint. The API returns a JWT containing the user's subject, department, role, and expiry.
+2. **Authenticated requests:** The frontend sends the token as a Bearer token to protected API endpoints.
+3. **Knowledge-base routing:** The backend routes SOC analysts to `soc_security_kb` and employee accounts to `company_handbook`.
+4. **Authorized retrieval:** The authorization layer filters retrieved chunks using department and classification metadata.
+5. **Generation:** Authorized context is passed to a security-focused LangChain prompt and the configured Groq chat model.
+6. **SOC domain screening:** The SOC-only typosquatting endpoint generates candidate lookalike domains and can query A, AAAA, MX, and NS DNS records.
+7. **Frontend:** React provides the authenticated dashboard, chat, alert investigation, incident report, and typosquatting scanner screens.
 
 ## Technology Stack
 
-- **Python** — application development and security testing
-- **LangChain** — RAG pipeline orchestration
-- **ChromaDB** — vector storage and semantic retrieval
-- **Sentence Transformers** — local embedding generation
-- **Google Gemini API** — language generation
-- **Git and GitHub** — version control
+- Python and FastAPI
+- React, Vite, and CSS
+- LangChain and `langchain-groq`
+- Groq API for LLM generation
+- ChromaDB for vector storage
+- Hugging Face Sentence Transformers (`sentence-transformers/all-MiniLM-L6-v2`) for local embeddings
+- PyJWT and password hashing for the demo login flow
+- `dnspython` for optional DNS checks
+- Git and GitHub
 
-## Security Features
+## Security Controls and Testing
 
-- **Department-based access control:** Shared internal documents and HR-confidential documents follow separate access rules.
-- **Metadata-based authorization:** Retrieved chunks are checked against department and classification metadata.
-- **Default-deny behavior:** Documents with missing or unexpected metadata are not authorized by the current retrieval policy.
-- **Prompt-injection defense:** The system prompt instructs the model to treat retrieved documents as untrusted data rather than executable instructions.
-- **Automated regression tests:** Verify that unauthorized users cannot retrieve HR documents while authorized users can.
+- **JWT-protected endpoints:** Chat and typosquatting requests require a valid token.
+- **Role-aware routing:** The server selects the knowledge base based on the verified JWT identity.
+- **SOC scanner authorization:** The typosquatting API checks that the authenticated user has the SOC department and `soc_analyst` role.
+- **Metadata-based retrieval policy:** Department and classification metadata determine whether candidate chunks can be returned.
+- **Default-deny behavior:** The current authorization function rejects unsupported departments and does not allow documents with unexpected classification values.
+- **Prompt-injection awareness:** The prompt instructs the model to treat retrieved content as untrusted data. This is a mitigation, not a guarantee.
+- **Recorded regression cases:** The frontend lists previously recorded security checks. That page is informational and does not execute tests.
 
-### Security Test Results
+Run the project's available automated tests locally before publishing claims about current test status. Previously recorded results are not proof that the current checkout passes.
 
-The current security regression suite contains nine passing tests covering:
+### Typosquatting scanner limitations
 
-- Department-based document authorization.
-- Denial of access for unknown users and missing user departments.
-- Denial of documents with missing or unexpected metadata.
-- Verification that HR salary data is absent from Engineering users' retrieved context.
-- Verification that HR salary data is absent when the user's department is missing.
-- Verification that the synthetic prompt-injection payload can be retrieved from the security notice.
+The scanner creates heuristic lookalike candidates using transformations such as character omission, repetition, transposition, keyboard substitutions, hyphen insertion, and alternative top-level domains. It can optionally query DNS records for generated candidates.
 
-The tests exercise the shared authorization function and ChromaDB retrieval using synthetic data. They run without calling the Gemini API.
+- A generated candidate is not necessarily registered, malicious, or impersonating a brand.
+- DNS records do not prove maliciousness or definitively establish domain registration status.
+- A DNS lookup error is not evidence that a domain is safe or unavailable.
+- The current scanner does not provide a calibrated risk score; `risk_score` may be `null`.
+- Validate findings using trusted threat-intelligence sources and manual investigation before taking action.
 
-In a separate manual experiment, Gemini summarized the security notice rather than following its embedded malicious instruction. This demonstrates resistance to the specific payload tested, not guaranteed protection against all prompt-injection attacks.
+### SOC workflow limitations
 
-These results validate the tested retrieval and authorization scenarios; they do not prove that every possible sensitive-data leakage path is prevented or that the application is production-secure.
-
-### Indirect Prompt-Injection Experiment
-
-A synthetic security notice contains instructions attempting to override the chatbot's normal behavior.
-
-In the observed test, the model summarized the legitimate security guidance instead of following the embedded instruction. A strengthened prompt was then introduced to reinforce the distinction between retrieved data and trusted instructions.
-
-This is a successful result for the tested example, not proof of immunity to prompt injection.
+The assistant provides guidance based on retrieved playbooks and user-provided evidence. It does not query a live SIEM, independently verify cloud activity, revoke credentials, terminate sessions, or automatically contain incidents. Analysts must validate generated guidance against original logs and approved incident-response procedures.
 
 ## Project Structure
 
 ```text
 SecureRAG/
-├── data/
-│   ├── company_handbook.txt
-│   ├── hr_confidential.txt
-│   └── security_notice.txt
+├── api.py
 ├── authorization.py
-├── build_knowledge_base.py
 ├── rag_chatbot.py
-├── test_authorization.py
-├── test_gemini.py
-├── check_retrieval.py
+├── ingest_soc_knowledge.py
+├── typosquatting.py
+├── SecureRAG_SOC_Knowledge_Base/
+│   ├── 01_siem_alert_triage.md
+│   ├── 02_windows_linux_authentication.md
+│   ├── 03_phishing_and_url_investigation.md
+│   ├── 04_mitre_threat_hunting.md
+│   ├── 05_incident_response_and_reporting.md
+│   └── 06_cloud_iam_and_api_abuse.md
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx
+│   │   ├── App.css
+│   │   └── Login.jsx
+│   ├── package.json
+│   └── package-lock.json
+├── chroma_db/                 # Generated locally; do not commit
+├── .env                       # Local secrets; do not commit
 ├── .gitignore
 └── README.md
 ```
 
-The `chroma_db/` directory is generated locally and should not be committed to version control.
+Other local test and ingestion scripts may exist in the repository. ChromaDB files, environment files, virtual environments, and dependency folders should remain untracked.
 
 ## Getting Started
 
-1. Install Python 3.12 or a compatible version.
-2. Create and activate a Python virtual environment.
-3. Install the required dependencies.
-4. Create a local `.env` file containing your Gemini API key:
+### Prerequisites
 
-   ```text
-   GOOGLE_API_KEY=your_api_key_here
-   ```
+- Python installed
+- Node.js and npm installed
+- A Groq API key
+- Git (optional, for cloning the repository)
 
-5. Add the synthetic text documents to `data/`.
-6. Build the knowledge base:
+### 1. Clone the repository
 
-   ```bash
-   python build_knowledge_base.py
-   ```
+```bash
+git clone <your-repository-url>
+cd SecureRAG
+```
 
-7. Launch the chatbot:
+### 2. Create and activate a Python virtual environment
 
-   ```bash
-   python rag_chatbot.py
-   ```
+On Windows PowerShell:
 
-8. Run the authorization regression tests:
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -U pip
+```
 
-   ```bash
-   python test_authorization.py
-   ```
+Install the Python dependencies used by the project. If a `requirements.txt` is present in the repository, use:
 
-Never commit API keys, credentials, real confidential documents, or local environment files.
+```powershell
+pip install -r requirements.txt
+```
 
-## Current Limitations
+Otherwise, install the dependencies listed in the Python imports and project setup, including FastAPI, Uvicorn, LangChain, `langchain-groq`, `langchain-chroma`, `langchain-huggingface`, `sentence-transformers`, `python-dotenv`, `PyJWT`, `pwdlib`, `email-validator`, and `dnspython`.
 
-- User identities and departments are simulated in local code rather than established through a production authentication system.
-- Authorization is enforced by application-level retrieval filtering; this project has not been assessed as a complete production authorization architecture.
-- Prompt-based defenses cannot guarantee resistance to all indirect prompt-injection attacks.
-- The current automated authorization tests validate retrieval behavior, not every possible information-leakage path through an LLM.
-- Gemini API usage is subject to the configured project's quota and rate limits.
+### 3. Configure environment variables
 
-## Learning Objectives
+Create a local `.env` file in the repository root. Add your own values; do not commit this file.
 
-- Understand LangChain-based RAG architecture.
-- Investigate indirect prompt injection and retrieval-related security failures.
-- Implement and test document-level access restrictions.
-- Explore sensitive-data protection and security logging.
-- Compare baseline and hardened RAG behavior.
-- Develop repeatable security regression tests for AI applications.
+```dotenv
+GROQ_API_KEY=your_groq_api_key
+JWT_SECRET=replace_with_a_long_random_secret
 
-## Project Status
+DEMO_HR_EMAIL=hr@example.com
+DEMO_HR_PASSWORD=replace_with_a_demo_password
 
-**In development** — Core RAG functionality, simulated department-based authorization, prompt-injection testing, and six authorization regression tests are implemented and passing.
+DEMO_ENGINEERING_EMAIL=engineering@example.com
+DEMO_ENGINEERING_PASSWORD=replace_with_a_demo_password
 
-Current capabilities include metadata-based document filtering, default-deny handling for missing or unexpected document metadata, and a security-focused prompt that treats retrieved documents as untrusted data.
+DEMO_FINANCE_EMAIL=finance@example.com
+DEMO_FINANCE_PASSWORD=replace_with_a_demo_password
 
-Future work includes broader adversarial testing, sensitive-data leakage evaluation, input/output security controls, improved security logging, and systematic attack-versus-defense comparisons.
+DEMO_SOC_EMAIL=soc@example.com
+DEMO_SOC_PASSWORD=replace_with_a_demo_password
+```
 
-**Limitations:** User identities are simulated locally, and prompt-based defenses do not guarantee immunity to prompt injection. The project has not undergone a comprehensive production security assessment.
+Use unique local demo passwords and a long, random JWT secret. The application expects all four demo account values to be configured. Never commit actual credentials, API keys, or JWTs.
+
+### 4. Build the knowledge bases
+
+If the source documents are present and you need to create or refresh the employee knowledge base, run the project's employee ingestion script (for example, `build_knowledge_base.py`, if present).
+
+To ingest the SOC playbooks:
+
+```powershell
+python ingest_soc_knowledge.py
+```
+
+The application expects ChromaDB collections named `company_handbook` and `soc_security_kb` in the local `chroma_db/` directory. Build both collections before testing the corresponding workspace.
+
+### 5. Start the FastAPI backend
+
+From the repository root:
+
+```powershell
+python -m uvicorn api:app --reload --port 8001
+```
+
+Check the health endpoint at <http://localhost:8001/api/health> and the interactive API documentation at <http://localhost:8001/docs>.
+
+### 6. Start the React frontend
+
+Open a second PowerShell window:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open the local URL printed by Vite, commonly <http://localhost:5173>.
+
+### 7. Test the typosquatting endpoint
+
+Sign in through the frontend using the local SOC analyst demo account. For API testing, open <http://localhost:8001/docs>, authorize with a valid SOC Bearer token, and try `POST /api/soc/typosquatting-scan` with:
+
+```json
+{
+  "domain": "google.com",
+  "check_dns": false
+}
+```
+
+This mode tests candidate generation without DNS queries. Set `check_dns` to `true` to request DNS checks. Only use the scanner for legitimate security investigation.
+
+### 8. Run authorization tests
+
+Run the test scripts that exist in the checkout, for example:
+
+```powershell
+python test_authorization.py
+```
+
+Check the current repository for the actual test filenames and dependencies before running them. Do not describe historical test results as current results without rerunning the tests.
+
+## Security and Privacy Notes
+
+- `.env`, API keys, passwords, JWTs, local databases, virtual environments, and dependency folders must not be committed.
+- Use synthetic or sanitized data during testing. Do not paste secrets or confidential production logs into the assistant.
+- Frontend navigation is not an access-control boundary. Authorization must be enforced by the API.
+- This prototype has not undergone a comprehensive production security assessment.
+- Model output can be incorrect or incomplete; verify decisions using source evidence and approved procedures.
+
+## Current Status and Future Work
+
+The prototype includes authenticated department-aware RAG, separate employee and SOC collections, SOC investigation/report workflows, and an API-backed typosquatting scanner. The scanner endpoint has been manually tested with DNS checks disabled, returning generated candidate domains.
+
+Potential next steps include automated API authorization tests, broader retrieval-leakage tests, scanner UI regression tests, improved audit logging, optional integration with trusted domain reputation sources, and deployment hardening.
+
+---
+
+**Disclaimer:** SecureRAG is an educational security prototype. It is not a substitute for a production IAM system, a dedicated threat-intelligence platform, or an organization's approved incident-response process.

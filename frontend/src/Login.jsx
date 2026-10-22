@@ -176,7 +176,7 @@ export default function Login({ onLogin }) {
           </div>
 
           <p className="login-demo-note">
-            UI preview only — authentication is not connected yet.
+             Secure sign-in · Access based on your authenticated account
           </p>
         </div>
 
