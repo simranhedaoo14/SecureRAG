@@ -9,6 +9,8 @@ import Login from "./Login";
 import QrScan from "./QrScan";
 import Incidents, { CreateIncidentFromScan } from "./Incidents";
 import ReactMarkdown from "react-markdown";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const API_BASE = "http://localhost:8001";
 
