@@ -36,9 +36,20 @@ def retrieve_authorized_documents(vector_store, question, user):
     if not decision.allow:
         return []
 
+    # Chroma returns a distance (lower = closer). Calibrate this threshold on
+    # your actual embedding model and collection; 1.0 is a starting point, not
+    # a universal relevance score. Configure RAG_MAX_DISTANCE in .env.
+    import os
+    max_distance = float(os.getenv("RAG_MAX_DISTANCE", "1.0"))
+    scope_filter = kb_scope_filter(decision)
     try:
-        candidates = vector_store.similarity_search(question, k=10,
-                                                    filter=kb_scope_filter(decision))
-    except TypeError:  # store without filter support: post-filter below still applies
-        candidates = vector_store.similarity_search(question, k=10)
-    return [d for d in candidates if _in_scope(d.metadata, decision.kb_scopes)][:3]
+        scored = vector_store.similarity_search_with_score(
+            question, k=10, filter=scope_filter
+        )
+    except TypeError:
+        # Fail closed if the vector store cannot enforce the pre-filter.
+        # Do not fall back to an unrestricted vector search.
+        return []
+    return [doc for doc, distance in scored
+            if distance <= max_distance and
+            _in_scope(doc.metadata, decision.kb_scopes)][:3]

@@ -9,7 +9,6 @@ import Login from "./Login";
 import QrScan from "./QrScan";
 import Incidents, { CreateIncidentFromScan } from "./Incidents";
 import ReactMarkdown from "react-markdown";
-import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const API_BASE = "http://localhost:8001";
@@ -48,6 +47,7 @@ function getInitialMessage(session) {
       ? socWelcome
       : employeeWelcome,
     sources: [],
+    isWelcome: true,
   }];
 }
 
@@ -56,6 +56,8 @@ export default function App() {
   const [page, setPage] = useState("Overview");
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+  const [chatMode, setChatMode] = useState("auto");
+  const [investigationStyle, setInvestigationStyle] = useState("interactive");
   const [busy, setBusy] = useState(false);
   const [backendStatus, setBackendStatus] = useState("Checking");
   const [alertText, setAlertText] = useState("");
@@ -85,8 +87,7 @@ export default function App() {
       return [
         ["Overview", LayoutDashboard],
       ["Incidents", ShieldAlert],
-        ["Alert Investigation", Siren],
-        ["Security Assistant", MessageSquare],
+        ["SOC Security Assistant", MessageSquare],
         ["Incident Report", ClipboardList],
         ["Typosquatting Scanner", Globe],
         ["QR Phishing", ShieldAlert],
@@ -131,14 +132,14 @@ export default function App() {
   }
 
   
-async function askBackend(question) {
+async function askBackend(question, history = [], mode = "assistant", responseStyle = "interactive") {
   const response = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${session.access_token}`,
     },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, history, mode, response_style: responseStyle }),
   });
 
   const raw = await response.text();
@@ -166,35 +167,57 @@ async function askBackend(question) {
 }
 
 
+  function detectRequestMode(text) {
+    const value = text.toLowerCase();
+    const alertSignals = [
+      /\b(event\s?id|eventid)\s*[:#]?\s*\d+/,
+      /\b(alert|security event|incident|siem|edr|suspicious|unusual|compromised)\b/,
+      /\b(source ip|src_ip|destination ip|failed logon|failed login|authentication failure|vpn account|vpn login|file activity)\b/,
+      /\b(log excerpt|syslog|windows event|powershell command)\b/,
+      /\b(brute.?force|malware detection|suspicious process|ioc|indicator of compromise)\b/,
+      /\b(severity:|hostname:|host:|detected by:)\b/,
+    ];
+    return alertSignals.some((pattern) => pattern.test(value)) ? "investigate" : "assistant";
+  }
+
   async function sendMessage(e) {
     e?.preventDefault();
     const question = input.trim();
     if (!question || busy) return;
 
-    setMessages((old) => [...old, { role: "user", text: question }]);
+    const priorTurns = messages.filter((m) => m && (m.role === "user" || m.role === "assistant") && !m.isWelcome).slice(-12);
+    const investigationOngoing = priorTurns.some((m) => m.mode === "investigate");
+    const detectedMode = chatMode === "auto"
+      ? (investigationOngoing ? "investigate" : detectRequestMode(question))
+      : chatMode;
+    const isInvestigation = isSoc && detectedMode === "investigate";
+    const backendQuestion = question;
+    const history = priorTurns.map(({ role, text }) => ({ role, content: text }));
+
+    setMessages((old) => [...old, {
+      role: "user",
+      text: question,
+      mode: isInvestigation ? "investigate" : "assistant",
+    }]);
     setInput("");
-    setPage(isSoc ? "Security Assistant" : "Chat");
+    setPage(isSoc ? "SOC Security Assistant" : "Chat");
     setBusy(true);
 
     try {
-      
-        const data = await askBackend(question);
-
-        if (!data || typeof data !== "object") {
-          throw new Error("The API returned an empty or invalid response.");
-        }
-
-        setMessages((old) => [
-          ...(Array.isArray(old) ? old.filter(Boolean) : []),
-          {
-            role: "assistant",
-            text: data.answer || "The API returned no answer.",
-            sources: Array.isArray(data.sources) ? data.sources : [],
-          },
-        ]);
-
-        setBackendStatus("Connected");
-
+      const data = await askBackend(backendQuestion, history, isInvestigation ? "investigate" : "assistant", investigationStyle);
+      if (!data || typeof data !== "object") {
+        throw new Error("The API returned an empty or invalid response.");
+      }
+      setMessages((old) => [
+        ...(Array.isArray(old) ? old.filter(Boolean) : []),
+        {
+          role: "assistant",
+          text: data.answer || "The API returned no answer.",
+          sources: Array.isArray(data.sources) ? data.sources : [],
+          mode: isInvestigation ? "investigate" : "assistant",
+        },
+      ]);
+      setBackendStatus("Connected");
     } catch (error) {
       setMessages((old) => [...old, {
         role: "assistant",
@@ -282,7 +305,7 @@ async function askBackend(question) {
 
   if (!session) return <Login onLogin={handleLogin} />;
 
-  const pageTitle = page === "Security Assistant" ? "Security Assistant" : page;
+  const pageTitle = page === "SOC Security Assistant" ? "SOC Security Assistant" : page;
   const sourceLabel = (source) => {
     if (typeof source === "string") return source;
     return [source?.source || source?.filename || "Document", source?.classification]
@@ -332,7 +355,7 @@ async function askBackend(question) {
                 <h1>{isSoc ? "SOC Analyst Overview" : "Secure Knowledge Overview"}</h1>
                 <p>{isSoc ? "Investigate security events with guidance grounded in your authorized SOC playbooks." : "Ask questions against the knowledge base authorized for your signed-in account."}</p>
               </div>
-              <button className="primary-button" onClick={() => setPage(isSoc ? "Alert Investigation" : "Chat")}>
+              <button className="primary-button" onClick={() => setPage(isSoc ? "SOC Security Assistant" : "Chat")}>
                 {isSoc ? <Siren size={16} /> : <MessageSquare size={16} />}
                 {isSoc ? "Investigate an Alert" : "Open Secure Chat"}
               </button>
@@ -356,8 +379,7 @@ async function askBackend(question) {
               <div className="panel">
                 <div className="panel-title"><div><h3>{isSoc ? "Investigation tools" : "Access controls"}</h3><p>{isSoc ? "Start with evidence, then validate hypotheses" : "Authorization is enforced by the API"}</p></div><LockKeyhole size={19} /></div>
                 {isSoc ? <>
-                  <PolicyRow title="Alert Investigation" desc="Paste an alert or log excerpt for a structured triage checklist." status="AVAILABLE" green />
-                  <PolicyRow title="Security Assistant" desc="Ask questions grounded in retrieved SOC playbooks." status="AVAILABLE" green />
+                  <PolicyRow title="SOC Security Assistant" desc="Ask security questions or paste alerts for guided, structured triage." status="AVAILABLE" green />
                   <PolicyRow title="Incident Report" desc="Draft a report and mark unknown facts as TBD." status="AVAILABLE" green />
                 </> : <>
                   <PolicyRow title="Shared internal documents" desc="Available when allowed by backend policy." status="POLICY-BASED" green />
@@ -369,8 +391,7 @@ async function askBackend(question) {
               <div className="panel">
                 <div className="panel-title"><div><h3>Quick actions</h3><p>Go to a workspace tool</p></div><ArrowIcon /></div>
                 {(isSoc ? [
-                  ["Alert Investigation", "Triage pasted logs or alerts", Siren],
-                  ["Security Assistant", "Ask about SOC procedures", MessageSquare],
+                  ["SOC Security Assistant", "Ask questions or investigate alerts in one chat", MessageSquare],
                   ["Incident Report", "Draft an incident report", ClipboardList],
                 ] : [
                   ["Chat", "Ask about authorized company documents", MessageSquare],
@@ -386,29 +407,56 @@ async function askBackend(question) {
           </div>
         )}
 
-        {(page === "Chat" || page === "Security Assistant") && (
+        {(page === "Chat" || page === "Security Assistant" || page === "SOC Security Assistant") && (
           <div className="chat-layout">
             <div className="chat-header">
-              <div><div className="eyebrow">RETRIEVAL-AUGMENTED GENERATION</div><h1>{isSoc ? "Security Assistant" : "Secure Chat"}</h1><p>{isSoc ? "Ask about triage, phishing, authentication, threat hunting, cloud IAM, and response." : "Ask questions against your authorized company knowledge base."}</p></div>
+              <div><div className="eyebrow">RETRIEVAL-AUGMENTED GENERATION</div><h1>{isSoc ? "SOC Security Assistant" : "Secure Chat"}</h1><p>{isSoc ? "Ask security questions or paste alerts and logs for guided investigation in one conversation." : "Ask questions against your authorized company knowledge base."}</p></div>
               <span className="muted-tag">{departmentLabel.toUpperCase()}</span>
             </div>
+            {isSoc && <div className="assistant-mode-bar">
+              <span className="mode-label">REQUEST MODE</span>
+              <div className="mode-options" role="group" aria-label="Assistant request mode">
+                <button type="button" className={chatMode === "auto" ? "selected" : ""} onClick={() => setChatMode("auto")}>Auto-detect</button>
+                <button type="button" className={chatMode === "assistant" ? "selected" : ""} onClick={() => setChatMode("assistant")}>Security question</button>
+                <button type="button" className={chatMode === "investigate" ? "selected" : ""} onClick={() => setChatMode("investigate")}>Investigate alert</button>
+              </div>
+              <small>{chatMode === "auto" ? "Detects investigations and continues them across messages." : chatMode === "investigate" ? "Investigate evidence step by step or request a report." : "Uses the standard knowledge-base question-answering flow."}</small>
+              <div className="mode-options" role="group" aria-label="Investigation response style">
+                <button type="button" className={investigationStyle === "interactive" ? "selected" : ""} onClick={() => setInvestigationStyle("interactive")}>Interactive investigation</button>
+                <button type="button" className={investigationStyle === "report" ? "selected" : ""} onClick={() => setInvestigationStyle("report")}>Detailed report</button>
+              </div>
+            </div>}
             <div className="chat-messages">
               {messages.filter(Boolean).map((m, i) => (
                 <div key={i} className={`message ${m.role}`}>
                   <div className="message-avatar">{m.role === "assistant" ? <Bot size={18} /> : <UserRound size={18} />}</div>
                   <div>
-                    <div className="message-label">{m.role === "assistant" ? "SecureRAG Assistant" : "You"}</div>
+                    <div className="message-label">{m.role === "assistant" ? "SOC Security Assistant" : "You"}</div>
                     <div className="message-bubble markdown-content">
                     {m.role === "assistant" ? (
-                      <ReactMarkdown>{m.text}</ReactMarkdown>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          table: ({ node, ...props }) => (
+                            <div className="markdown-table-wrap">
+                              <table className="markdown-table" {...props} />
+                            </div>
+                          ),
+                        }}
+                      >
+                        {m.text}
+                      </ReactMarkdown>
                     ) : (
                       m.text
                     )}
                   </div>
                     {m.role === "assistant" && m.sources?.length > 0 && (
-                      <div className="message-sources"><div className="sources-label">Retrieved sources</div><div className="source-list">
-                        {m.sources.map((source, index) => <span className="source-chip" key={index}>{sourceLabel(source)}</span>)}
-                      </div></div>
+                      <details className="message-sources">
+                        <summary className="sources-label">Knowledge sources used ({m.sources.length})</summary>
+                        <div className="source-list">
+                          {m.sources.map((source, index) => <span className="source-chip" key={index}>{sourceLabel(source)}</span>)}
+                        </div>
+                      </details>
                     )}
                   </div>
                 </div>
@@ -416,26 +464,13 @@ async function askBackend(question) {
               {busy && <div className="panel-note"><Activity size={16} /> Working on your request…</div>}
             </div>
             <form className="chat-composer" onSubmit={sendMessage}>
-              <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder={isSoc ? "Ask about an alert, event ID, phishing indicator, or response step..." : "Ask about company policies..."} rows="2" disabled={busy} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(e); } }} />
+              <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder={isSoc ? "Ask a security question or paste an alert / log excerpt..." : "Ask about company policies..."} rows="2" disabled={busy} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(e); } }} />
               <button className="send-button" type="submit" disabled={busy || !input.trim()}><Send size={17} /> {busy ? "Working…" : "Send"}</button>
             </form>
             <p className="chat-disclaimer">Answers may be incomplete. Verify findings against original logs and approved procedures.</p>
           </div>
         )}
 
-        {page === "Alert Investigation" && isSoc && (
-          <div className="content">
-            <div className="welcome-row"><div><div className="eyebrow">SOC / TRIAGE</div><h1>Alert Investigation</h1><p>Submit a sanitized alert or log excerpt to get a playbook-grounded triage plan.</p></div><Siren size={28} /></div>
-            <div className="banner"><div className="banner-icon"><ShieldCheck size={24} /></div><div><strong>Analyst-assisted investigation</strong><p>This sends your text to the RAG backend and configured language model. It does not query a live SIEM or automatically contain threats.</p></div><span className="banner-badge">MANUAL INPUT</span></div>
-            <form className="panel investigation-form" onSubmit={investigateAlert}>
-              <label htmlFor="alert-input"><strong>Alert / log excerpt</strong></label>
-              <textarea id="alert-input" rows="9" value={alertText} onChange={(e) => setAlertText(e.target.value)} placeholder={'Paste sanitized evidence, for example:\nEvent ID: 4625\nHost: workstation-07\nAccount: test-user\nSeveral failed logons within 2 minutes…'} />
-              <p className="chat-disclaimer">Remove passwords, tokens, personal data, and unrelated sensitive information before submitting.</p>
-              <button className="primary-button" type="submit" disabled={busy || !alertText.trim()}><Search size={16} /> {busy ? "Investigating…" : "Generate triage guidance"}</button>
-            </form>
-            {alertResult && <div className="panel investigation-result"><h2>Investigation guidance</h2><div className="message-bubble">{alertResult.answer}</div>{alertResult.sources?.length > 0 && <><h3>Retrieved sources</h3><div className="source-list">{alertResult.sources.map((s, i) => <span className="source-chip" key={i}>{sourceLabel(s)}</span>)}</div></>}</div>}
-          </div>
-        )}
 
         {page === "Incident Report" && isSoc && (
           <div className="content">

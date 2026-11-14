@@ -211,6 +211,129 @@ h2{font:600 17px 'Space Grotesk',sans-serif;margin:0 0 4px;color:#24344a}
 .markdown-content {
   line-height: 1.7;
   overflow-wrap: anywhere;
+  white-space: normal;
+  min-width: 0;
+  color: #334155;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  color: #172b4d;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
+.markdown-content h1 {
+  font-size: 1.2rem;
+  font-weight: 800;
+  padding-bottom: 9px;
+  border-bottom: 2px solid #dce7f5;
+  margin: 22px 0 12px;
+}
+
+.markdown-content h2 {
+  font-size: 1.05rem;
+  font-weight: 800;
+  padding: 9px 12px;
+  margin: 24px 0 10px;
+  border-left: 4px solid #3478d4;
+  border-radius: 0 7px 7px 0;
+  background: #f1f6fd;
+}
+
+.markdown-content h3 {
+  font-size: .96rem;
+  font-weight: 750;
+  margin: 18px 0 8px;
+}
+
+.markdown-content h4 {
+  font-size: .88rem;
+  font-weight: 750;
+  margin: 14px 0 7px;
+}
+
+.markdown-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 13px 0 17px;
+  border: 1px solid #dce5f0;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.markdown-table {
+  width: 100%;
+  min-width: 460px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  text-align: left;
+}
+
+.markdown-table th {
+  background: #edf3fb;
+  color: #263b59;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.markdown-table th,
+.markdown-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #e8edf4;
+  border-right: 1px solid #edf1f6;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.markdown-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.markdown-table th:last-child,
+.markdown-table td:last-child {
+  border-right: 0;
+}
+
+.markdown-table tbody tr:nth-child(even) {
+  background: #f8fafd;
+}
+
+.markdown-table tbody tr:hover {
+  background: #f0f6ff;
+}
+
+.markdown-content blockquote {
+  margin: 12px 0;
+  padding: 9px 13px;
+  border-left: 3px solid #8aaedb;
+  background: #f5f8fc;
+  color: #52647c;
+  border-radius: 0 7px 7px 0;
+}
+
+.markdown-content pre {
+  overflow-x: auto;
+  padding: 13px;
+  border: 1px solid #e1e8f0;
+  border-radius: 8px;
+  background: #f6f8fb;
+  color: #24364d;
+  white-space: pre;
+}
+
+.markdown-content pre code {
+  overflow-wrap: normal;
+}
+
+.markdown-content hr {
+  border: 0;
+  border-top: 1px solid #e5ebf2;
+  margin: 19px 0;
 }
 
 .markdown-content > :first-child {
@@ -221,13 +344,6 @@ h2{font:600 17px 'Space Grotesk',sans-serif;margin:0 0 4px;color:#24344a}
   margin-bottom: 0;
 }
 
-.markdown-content h1,
-.markdown-content h2,
-.markdown-content h3 {
-  margin: 18px 0 8px;
-  font-size: 1rem;
-  font-weight: 700;
-}
 
 .markdown-content p {
   margin: 8px 0;
@@ -299,3 +415,19 @@ h2{font:600 17px 'Space Grotesk',sans-serif;margin:0 0 4px;color:#24344a}
 .scan-found { background: #e5f7ed; color: #188653; }
 .scan-warning { background: #fff2df; color: #a46b16; }
 @media (max-width: 700px) { .scan-table { min-width: 620px; } .scan-heading { flex-direction: column; } }
+
+
+/* Unified SOC Security Assistant request-mode controls */
+.assistant-mode-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:12px 14px;margin-top:14px;border:1px solid #e2e9f2;border-radius:10px;background:#f8faff}
+.mode-label{font-size:9px;font-weight:800;letter-spacing:.08em;color:#74839a}
+.mode-options{display:flex;flex-wrap:wrap;gap:6px}
+.mode-options button{border:1px solid #dce4ef;background:#fff;color:#53647c;border-radius:7px;padding:7px 10px;font-size:10px;font-weight:600;cursor:pointer}
+.mode-options button.selected{background:#e8f1ff;border-color:#8db7f0;color:#1d5eae}
+.assistant-mode-bar small{flex-basis:100%;font-size:10px;color:#8290a3;margin-left:0}
+@media(max-width:600px){.assistant-mode-bar{align-items:flex-start;flex-direction:column}.mode-options{width:100%}.mode-options button{flex:1}}
+
+/* Sources are available for verification, without cluttering every reply. */
+.message-sources { margin-top: 10px; }
+.message-sources .sources-label { cursor: pointer; margin: 0; list-style-position: inside; }
+.message-sources .source-list { margin-top: 10px; }
+.message-sources:not([open]) { padding: 8px 12px; }
