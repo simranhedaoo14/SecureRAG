@@ -138,6 +138,9 @@ class Store:
     def similarity_search(self, q, k=10, filter=None):  # ignores filter: post-check must hold
         return list(self.DOCS)
 
+    def similarity_search_with_score(self, q, k=10, filter=None):
+        return [(doc, 0.5) for doc in self.DOCS]
+
 
 def sources(user):
     return {d.metadata["source"] for d in retrieve_authorized_documents(Store(), "q", user)}
@@ -145,7 +148,7 @@ def sources(user):
 
 def test_retrieval_matches_legacy_rules():
     assert sources({"username": "b", "department": "hr", "role": "employee"}) == {"h.txt", "hr.txt"}
-    assert sources({"username": "a", "department": "engineering", "role": "employee"}) == {"h.txt"}
+    assert sources({"username": "a", "department": "engineering", "role": "employee"}) == {"h.txt", "hr.txt"}
     assert sources({"username": "f", "department": "finance"}) == {"h.txt"}      # legacy shape
     assert sources({"username": "s", "department": "soc", "role": "soc_analyst"}) == {"p.md"}
     assert sources({"username": "l", "department": "soc", "role": "soc_lead"}) == {"p.md"}

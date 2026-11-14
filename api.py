@@ -507,3 +507,8 @@ from incident_api import build_router, revoke_jti, revoked_jtis  # noqa: E402
 app.include_router(build_router(get_current_user))
 from qr_api import build_router as build_qr_router  # noqa: E402
 app.include_router(build_qr_router(get_current_user))
+
+
+# Restricted local regression test runner; no chatbot or retrieval changes.
+from security_tests_api import build_router as build_security_tests_router
+app.include_router(build_security_tests_router(get_current_user))

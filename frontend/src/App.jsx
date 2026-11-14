@@ -7,6 +7,7 @@ import {
 import "./App.css";
 import Login from "./Login";
 import QrScan from "./QrScan";
+import SecurityTests from "./SecurityTests";
 import Incidents, { CreateIncidentFromScan } from "./Incidents";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -562,11 +563,7 @@ async function askBackend(question, history = [], mode = "assistant", responseSt
         )}
 
         {page === "Security Tests" && (
-          <div className="content">
-            <div className="welcome-row"><div><div className="eyebrow">VALIDATION / REGRESSION</div><h1>Security Tests</h1><p>Previously recorded checks. This page does not execute the test suite.</p></div><span className="muted-tag">RECORDED ONLY</span></div>
-            <div className="panel test-panel">{recordedTests.map((test, i) => <div className="full-test-row" key={test}><div className="test-number">{String(i + 1).padStart(2, "0")}</div><div className="test-info"><strong>{test}</strong><span>{i === 8 ? "A payload retrieval check does not prove resistance to prompt injection." : "Previously recorded local result; rerun tests to confirm current behavior."}</span></div><span className="muted-tag">RECORDED</span></div>)}</div>
-            <div className="panel-note standalone"><AlertTriangle size={17} /> Do not present these as fresh test results. Run your current Python test suite and document the actual output.</div>
-          </div>
+          <SecurityTests token={session.access_token} role={session.role} />
         )}
 
         {page === "Knowledge Base" && (
