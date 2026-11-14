@@ -106,6 +106,11 @@ def build_router(get_current_user) -> APIRouter:
     def add_note(incident_id: str, body: Note, user: dict = Depends(get_current_user)):
         return run(user, core.incident_add_note, incident_id, body.note, body.kind)
 
+    @router.post("/api/incidents/{incident_id}/indicators")
+    def add_indicator(incident_id: str, body: Indicator,
+                      user: dict = Depends(get_current_user)):
+        return run(user, core.incident_add_ioc, incident_id, body)
+
     @router.post("/api/incidents/{incident_id}/actions")
     def propose(incident_id: str, body: Proposal, user: dict = Depends(get_current_user)):
         return run(user, core.incident_propose_action, incident_id, body.action_type, body.reason)
